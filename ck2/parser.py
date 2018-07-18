@@ -10,10 +10,29 @@ class CK2SaveNode(object):
         self.node_name = name
         self.data = []
         self.parent = parent
+        self.node_occurrence = {}
+        self.data_occurrence = {}
+
+    
+    def printStatistics(self):
+        r = '{0}-node-statistics:\n'.format(self.node_name)
+        r += '\tdata-entries:\n'
+        for key in self.data_occurrence.keys():
+            r += '\t\t{0} {1} entries\n'.format(self.data_occurrence[key], key)
+        r += '\tnodes:\n'
+        for key in self.node_occurrence.keys():
+            r += '\t\t{0} {1} nodes\n'.format(self.node_occurrence[key], key)
+        return r
 
     
     def numDataElements(self):
         return len(self.data)
+
+
+class ExpKey(object):
+    def __init__(self, key: str, k_id: int):
+        self.key = key
+        self.id = k_id
 
 
 def stringifyNode(node: CK2SaveNode, indentLevel=0, recursive=True):
@@ -35,24 +54,42 @@ class CK2ParseEngine(object):
         self.tokenLines = []
         self.rootNode = CK2SaveNode('root', None)
 
+
+    def hasNode(self, root: CK2SaveNode, name: str):
+        if name in root.key_occurrence.keys():
+            return True
+        else:
+            return False
+
     
     def findNode(self, root: CK2SaveNode, name: str):
         for dat in root.data:
-            key = dat[0]
             value = dat[1]
             if isinstance(value, CK2SaveNode):
-                if key == name:
+                if value.node_name == name:
                     return value
         return None
 
 
     def findPair(self, root: CK2SaveNode, name: str):
         for dat in root.data:
-            key = dat[0]
             value = dat[1]
-            if key == name:
+            if dat[0] == name:
                 return value
         return 'undefined'
+
+
+    def findAllNodes(self, root: CK2SaveNode, name: str):
+        # Return orphaned node with all found nodes
+        n = CK2SaveNode('root', None)
+        i = 0
+        for dat in root.data:
+            value = dat[1]
+            if isinstance(value, CK2SaveNode):
+                if value.node_name == name:
+                    n.data.append((str(i), value))
+                    i += 1
+        return n
 
 
     def tokenize(self):
@@ -78,19 +115,37 @@ class CK2ParseEngine(object):
 
                     # Strip quotes
                     if value.find('\"') >= 0:
-                        value.replace('\"', '')
+                        value = value.replace('\"', '')
 
-                    # Boolean parsing
+                    # Data array parsing
+                    if value.find('{') == 0:
+                        value = value[1:-1].split(' ')
+
+                    # Boolean parsing, MUST BE DONE LAST
                     if value == 'yes':
                         value = True
                     elif value == 'no':
                         value = False
 
+
+                    # Calculate occurrence
+                    if not key in node.data_occurrence.keys():
+                        node.data_occurrence[key] = 1
+                    else:
+                        node.data_occurrence[key] += 1
                     node.data.append((key, value))
                 else:
                     # Node start
+                    key = tL[0]
                     nodeName = tL[0]
                     newNode = CK2SaveNode(nodeName, node)
+
+                    # Calculate occurrence
+                    if not key in node.node_occurrence.keys():
+                        node.node_occurrence[key] = 1
+                    else:
+                        node.node_occurrence[key] += 1
+
                     node.data.append((nodeName, newNode))
                     nodeLevel += 1
                     if tL[1] == '{':
@@ -102,6 +157,15 @@ class CK2ParseEngine(object):
                     if nodeName == 'UnnamedNode':
                         # Create unnamed node
                         newNode = CK2SaveNode(nodeName, node)
+
+                        key = 'UnnamedNode'
+
+                        # Calculate occurrence
+                        if not key in node.node_occurrence.keys():
+                            node.node_occurrence[key] = 1
+                        else:
+                            node.node_occurrence[key] += 1
+
                         node.data.append((nodeName, newNode))
                         nodeLevel += 1
                         node = newNode
@@ -113,27 +177,13 @@ class CK2ParseEngine(object):
                         nodeLevel -= 1
                         node = node.parent
                     else:
-                        loggy.log('Reached end of file!')
+                        loggy.log('Node Generator - Reached end of data!')
                 else:
                     pass
-    
-
-def writeNode(baseName: str, parser: CK2ParseEngine, nodeName: str):
-    if nodeName == 'root':
-        with open('{0}.{1}.parsed'.format(baseName, nodeName), 'w') as outParse:
-            # Write root non-recursively
-            outParse.write(stringifyNode(parser.rootNode, 0, False))
-    else:
-        rqstNode = parser.findNode(parser.rootNode, nodeName)
-        if not rqstNode == None:
-            with open('{0}.{1}.parsed'.format(baseName, nodeName), 'w') as outParse:
-                outParse.write(stringifyNode(rqstNode))
-        else:
-            loggy.log('Failed to find node {0}! Cannot write non-existing node'.format(nodeName))
 
 
 def saveDynasties(parser: CK2ParseEngine, db: SaveDatabase):
-    loggy.log('Writing Dynasties...')
+    loggy.log('DB Writer - Writing Dynasties...')
     db.addTable('dynasties', [
         ('id', 'text'),
         ('name', 'text'),
@@ -161,7 +211,7 @@ def saveDynasties(parser: CK2ParseEngine, db: SaveDatabase):
 
 
 def saveCharacters(parser: CK2ParseEngine, db: SaveDatabase):
-    loggy.log('Writing Characters...')
+    loggy.log('DB Writer - Writing Characters...')
     db.addTable('characters', [
         ('id', 'text'),
         ('name', 'text'),
@@ -176,8 +226,6 @@ def saveCharacters(parser: CK2ParseEngine, db: SaveDatabase):
         ('father', 'text'),
         ('mother', 'text'),
         ('spouse', 'text'),
-        ('attributes', 'text'),
-        ('traits', 'text'),
         ('prestige', 'text'),
         ('piety', 'text'),
         ('host', 'text'),
@@ -200,8 +248,6 @@ def saveCharacters(parser: CK2ParseEngine, db: SaveDatabase):
             father = parser.findPair(value, 'fat')
             mother = parser.findPair(value, 'mot')
             spouse = parser.findPair(value, 'spouse')
-            attributes = parser.findPair(value, 'att')
-            traits = parser.findPair(value, 'traits')
             prestige = parser.findPair(value, 'prs')
             piety = parser.findPair(value, 'piety')
             host = parser.findPair(value, 'host')
@@ -217,42 +263,45 @@ def saveCharacters(parser: CK2ParseEngine, db: SaveDatabase):
             religion = religion.replace('\"', '')
             db.addRow('characters', (
                 key, name, religion, dynasty, female, culture, birth_date, death_date,
-                death_cause, killer, father, mother, spouse, attributes, traits, prestige,
-                piety, host
+                death_cause, killer, father, mother, spouse, prestige, piety, host
             ))
 
-    
-def execute(inputFile: str, outputFile: str):
+
+def loadSave(inputFile: str):
     src = inputFile
-    loggy.log('Loading savegame')
+    loggy.log('Load savegame data [1/4] - Load savegame into memory')
     with open('{0}'.format(src), 'r') as saveFile:
         lines = saveFile.readlines()
 
     linesstripped = []
     for line in lines:
         linesstripped.append(line.strip())
-    loggy.log('Savegame loaded')
 
-    # Parse and save data
-    dst = outputFile
-    loggy.log('Parsing savegame data [1/5] - Initialize Parse Engine')
+    # Parse data and return parse engine
+    loggy.log('Load savegame data [2/4] - Initialize Parse Engine')
     engine = CK2ParseEngine(linesstripped)
-    loggy.log('Parsing savegame data [2/5] - Tokenizing data')
+    loggy.log('Load savegame data [3/4] - Tokenizing raw data')
     engine.tokenize()
-    loggy.log('Parsing savegame data [3/5] - Generate data nodes')
+    loggy.log('Load savegame data [4/4] - Generate save nodes')
     engine.nodify()
-    loggy.log('Parsed data with {0} nodes under root'.format(engine.rootNode.numDataElements()))
-    loggy.log('Parsing savegame data [4/5] - Writing parse dump')
-    #writeNode(dst, engine, 'root')
-    #writeNode(dst, engine, 'character')
-    #writeNode(dst, engine, 'player')
-    #writeNode(dst, engine, 'game_rules')
-    #writeNode(dst, engine, 'flags')
-    #writeNode(dst, engine, 'character')
-    #writeNode(dst, engine, 'dynasties')
-    loggy.log('Parsing savegame data [5/5] - Writing output database')
+    return engine
+    
+def execute(inputFile: str, outputFile: str):
+    engine = loadSave(inputFile)
+    dst = outputFile
+
+    # Debug dumps
+    loggy.log('Parse Dumper [1/2] - Generating statistics')
+    with open('parse-rootnode-stats.txt', 'w') as sFile:
+        sFile.write(engine.rootNode.printStatistics())
+
+    loggy.log('Parse Dumper [2/2] - Dumping root node recursively')
+    with open('parse-rootnode-debugview.txt', 'w') as sFile:
+        sFile.write(stringifyNode(engine.rootNode))
+
+    loggy.log('Converting Data [1/1] - Writing output database')
     db = SaveDatabase('{0}.sqlite'.format(dst))
     saveDynasties(engine, db)
     saveCharacters(engine, db)
     db.export()
-    loggy.log('Finished parsing savegame!')
+    loggy.log('Converted save to sqlite DB')
