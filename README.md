@@ -3,7 +3,7 @@
 ## Planned tools:
 
 ### CK2
-* Save Parser
+* Save Parser (Semi-finished)
 * Chronicle to HTML Converter
 * Character Story Generator
 
