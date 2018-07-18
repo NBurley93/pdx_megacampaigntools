@@ -1,0 +1,6 @@
+{
+    "ck2-parser": {
+        "source-file": "./testsave.ck2",
+        "destination": "testsave"
+    }
+}
