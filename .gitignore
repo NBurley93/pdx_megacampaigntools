@@ -1,5 +1,6 @@
 .vscode
 __pycache__
 logs/
-*.ck2parsed
+*.parsed
+*.sqlite
 *.ck2
